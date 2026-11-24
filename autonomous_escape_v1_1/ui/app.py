@@ -94,7 +94,7 @@ def ease(t):
 
 
 class App:
-    def __init__(self, mode='ai', rover='A*', alien='Greedy', seed=None, speed=4, headless=False):
+    def __init__(self, mode='ai', rover='A*', alien='Apex', seed=None, speed=4, headless=False):
         pg.init()
         pg.display.set_caption('Autonomous Escape')
         flags = 0 if os.environ.get('SDL_VIDEODRIVER') == 'dummy' else pg.SCALED | pg.RESIZABLE
@@ -570,32 +570,6 @@ class App:
         pg.draw.rect(sc, (int(60 + 26 * pulse), int(190 + 30 * pulse), int(206 + 26 * pulse)), start, border_radius=12)
         self.blit_text('LAUNCH', start.center, 24, BG, True, 'center')
         self.blit_text('Arrows choose, Enter starts, R random map, Esc quits', (92, start.bottom + 16), 16, MUTED)
-        # rules card
-        from escape import DEFAULT as R
-        card = self.card(690, 262, 548, 448)
-        self.blit_text('How it plays', (card.x + 24, card.y + 18), 22, TEXT, True)
-        sc.blit(self.rover_img, self.rover_img.get_rect(center=(card.right - 92, card.y + 34)))
-        sc.blit(self.ufo_img, self.ufo_img.get_rect(center=(card.right - 44, card.y + 30 + 4 * math.sin(now / 300))))
-        lines = [
-            (CYAN, f'The rover acts every turn. A move or a wait costs {R.move_cost} fuel.'),
-            (CYAN, f'Laser: blast an adjacent loose boulder for {R.shot_cost} fuel.'),
-            (CYAN, f'The ridges are known from orbit. Radar sees boulders {R.radar} tiles around.'),
-            (ORANGE, 'Every game is new: map size, maze, base and pad, how often the alien strikes '
-                     'and how many strikes it gets are all random.'),
-            (ORANGE, 'Boulder: blocks a tile at once. Hidden from the rover outside its radar.'),
-            (ORANGE, f'Debris: a glowing streak, visible anywhere, lands {R.debris_delay - 1}-{R.debris_delay + 1} '
-                     f'turns later. It fuses a boulder (laser-proof) or hits the rover for '
-                     f'{R.debris_damage - 2}-{R.debris_damage + 2} fuel.'),
-            (MUTED, 'No strikes next to the rover or near the base and the pad.'),
-            (GREEN, 'Start with 1.6-2.2x the fuel of the shortest route. Reach the pad to win.'),
-        ]
-        y = card.y + 64
-        for col, line in lines:
-            pg.draw.circle(sc, col, (card.x + 30, y + 11), 5)
-            for part in self.wrap(line, 17, card.width - 70):
-                self.blit_text(part, (card.x + 46, y), 17, TEXT)
-                y += 23
-            y += 8
 
     # ------------------------------------------------------------ game input
     def handle_camera(self, e):
@@ -1132,8 +1106,7 @@ class App:
                    f'+ / -  speed ({self.speed} moves/s)']
         ctl += ['Wheel zoom · right-drag pan · Z whole map · V follow rover',
                 'F fog · P route · C cut · G grid · R replay · N next map · Esc']
-        for i, line in enumerate(ctl):
-            self.blit_text(line, (r.x + 16, r.y + 32 + i * 22), 14, TEXT)
+        pass
         ly = r.bottom - 34
         lx = r.x + 12
         for key, label in (('soft', 'loose boulder'), ('hard', 'fused'), ('debris', 'incoming'),
@@ -1181,7 +1154,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='Autonomous Escape')
     ap.add_argument('--mode', choices=[m for m, _ in MODES], default='ai')
     ap.add_argument('--rover', choices=list(ROVER_BY_NAME), default='A*')
-    ap.add_argument('--alien', choices=list(ALIEN_BY_NAME), default='Greedy')
+    ap.add_argument('--alien', choices=list(ALIEN_BY_NAME), default='Apex')
     ap.add_argument('--seed', type=int)
     ap.add_argument('--speed', type=int, default=4)
     ap.add_argument('--play', action='store_true', help='skip the menu')
