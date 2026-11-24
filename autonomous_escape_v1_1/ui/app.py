@@ -94,7 +94,7 @@ def ease(t):
 
 
 class App:
-    def __init__(self, mode='ai', rover='A*', alien='Apex', seed=None, speed=4, headless=False):
+    def __init__(self, mode='ai', rover='A*', alien='Strategic Hunter', seed=None, speed=4, headless=False):
         pg.init()
         pg.display.set_caption('Autonomous Escape')
         flags = 0 if os.environ.get('SDL_VIDEODRIVER') == 'dummy' else pg.SCALED | pg.RESIZABLE
@@ -1151,7 +1151,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='Autonomous Escape')
     ap.add_argument('--mode', choices=[m for m, _ in MODES], default='ai')
     ap.add_argument('--rover', choices=list(ROVER_BY_NAME), default='A*')
-    ap.add_argument('--alien', choices=list(ALIEN_BY_NAME), default='Apex')
+    ap.add_argument('--alien', choices=list(ALIEN_BY_NAME), default='Strategic Hunter')
     ap.add_argument('--seed', type=int)
     ap.add_argument('--speed', type=int, default=4)
     ap.add_argument('--play', action='store_true', help='skip the menu')

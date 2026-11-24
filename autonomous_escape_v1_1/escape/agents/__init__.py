@@ -1,6 +1,6 @@
 from .base import Agent
 from .rovers import ROVERS, AStarRover, MinimaxRover, FuzzyRover, EscapeIntelligenceRover
-from .aliens import ALIENS, RandomAlien, GreedyAlien, MCTSAlien, StrategicHunterAlien, ApexAlien
+from .aliens import ALIENS, RandomAlien, GreedyAlien, MCTSAlien, StrategicHunterAlien
 
 ROVER_BY_NAME = {c.name: c for c in ROVERS}
 ALIEN_BY_NAME = {c.name: c for c in ALIENS}

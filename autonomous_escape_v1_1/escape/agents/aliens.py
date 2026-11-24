@@ -209,54 +209,6 @@ def _smart_rover_action(sim):
 
 
 # ---------------------------------------------------------------- strategic hunter
-class StrategicHunterAlien(Agent):
-    """Hybrid alien: A* route prediction + BFS connectivity + min-vertex cut
-    along the rover's active path + lookahead fuel-drain harassment."""
-    name = 'Strategic Hunter'
-    side = ALIEN
-
-    def __init__(self, seed=0):
-        super().__init__()
-        self.rng = random.Random(seed)
-
-    def act(self, s):
-        apex = getattr(self, '_core', None)
-        if apex is None:
-            apex = ApexAlien(seed=0)
-            apex.rng = self.rng
-            self._core = apex
-        a = apex.act(s)
-        self.nodes = apex.nodes
-        self.info = apex.info
-        return a
-
-
-ALIENS.append(StrategicHunterAlien)
-
-
-# ================================================================ APEX ALIEN
-# Game-theoretically grounded alien AI:
-#
-#  1. INSTANT WIN      — drop a boulder or harden a soft boulder on the rover's
-#     path if doing so immediately makes route_cost > fuel or INF.
-#
-#  2. HARDEN ON-PATH   — never leave a placed SOFT boulder on the active cut
-#     or rover's route unhardened while wandering off-path; immediately seal it
-#     with debris if the rover cannot reach and shoot it before landing.
-#
-#  3. PATH-FIRST CUT   — compute the minimum vertex cut that respects lead time
-#     (so OPEN cut tiles are far enough ahead to survive until hardened), and
-#     ALWAYS strike the cut tile ON the rover's current optimal path first!
-#     By Max-Flow Min-Cut, the rover's path MUST intersect the cut, so ~100%
-#     of strikes hit where the rover is actually heading and force early
-#     detours/backtracking.
-#
-#  4. PATH BOTTLENECK & LOOKAHEAD DRAIN — when the cut is too wide to seal
-#     within the remaining ticks, evaluate tiles strictly on the rover's active
-#     route (and belief route): prioritize permanent HARD chokepoints with huge
-#     detour gain, or verify boulder/debris/fireball with a smart-rover Sim.
-# ================================================================
-
 def _rover_bfs_dist(gmap, blk, rover):
     """BFS move-distance from the rover (ignoring HARD)."""
     from collections import deque
@@ -271,9 +223,10 @@ def _rover_bfs_dist(gmap, blk, rover):
     return dist
 
 
-class ApexAlien(Agent):
-    """Path-first min-cut sealer and bottleneck hunter."""
-    name = 'Apex'
+class StrategicHunterAlien(Agent):
+    """Hybrid alien: A* route prediction + BFS connectivity + path-first
+    min-vertex-cut sealing + bottleneck detour & smart-rover lookahead."""
+    name = 'Strategic Hunter'
     side = ALIEN
 
     CUT_LIMIT = 10
@@ -412,8 +365,7 @@ class ApexAlien(Agent):
             if not (in_cut or on_route):
                 continue
             gain = self._detour_gain(s, eff_blk, eff_cost if eff_cost != INF else raw_cost, p, HARD, counter)
-            can_finish_cut = in_cut and need <= est_strikes + 1 and d <= raw_cost
-            if on_route or gain >= 4 or can_finish_cut:
+            if in_cut or on_route or gain >= 4:
                 prio = (
                     1 if p in path_pos else 0,
                     1 if in_cut else 0,
@@ -502,5 +454,5 @@ class ApexAlien(Agent):
         return best_a
 
 
-ALIENS.append(ApexAlien)
+ALIENS.append(StrategicHunterAlien)
 

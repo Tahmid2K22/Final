@@ -67,6 +67,6 @@ def random_rules(game_seed, gmap):
     from .graph import disjoint_routes
     rng = random.Random(game_seed * 7 + 3)
     cut = disjoint_routes(gmap, 8)
-    return replace(DEFAULT, size=gmap.size, alien_every=rng.randint(6, 11),
+    return replace(DEFAULT, size=gmap.size, alien_every=rng.randint(6, 10),
                    alien_budget=max(2, 2 * cut + rng.randint(-2, 3)),   # around what a full seal needs
-                   fuel_mult=round(rng.uniform(1.6, 2.2), 2))
+                   fuel_mult=round(rng.uniform(1.6, 2.1), 2))
