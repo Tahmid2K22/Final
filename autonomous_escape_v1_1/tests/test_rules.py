@@ -79,7 +79,7 @@ def test_debris_lands_after_delay_and_hardens(s):
     p = far_tile(s)
     s.turn = ALIEN
     s.apply_alien(('boulder', p))
-    assert s.blk[p] == SOFT and s.budget == 10 ** 9 - 1
+    assert s.blk[p] == SOFT and s.budget == s.budget0 - 1
     s.turn = ALIEN
     s.apply_alien(('debris', p))
     s.apply_rover(('wait', None))
@@ -123,7 +123,7 @@ def test_alien_target_rules(s):
 def test_hold_does_not_spend_budget(s):
     s.turn = ALIEN
     s.apply_alien(None)
-    assert s.budget == 10 ** 9
+    assert s.budget == s.budget0
 
 
 def test_sealed_ends_game(s):

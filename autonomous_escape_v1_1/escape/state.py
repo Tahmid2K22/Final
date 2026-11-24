@@ -45,8 +45,8 @@ class GameState:
         L, _ = astar(gmap, {}, gmap.start, gmap.goal, rules)
         self.shortest = L
         self.fuel0 = self.fuel = round(rules.fuel_mult * L)
-        self.budget = 10 ** 9                       # alien strikes are unlimited
-        self.budget0 = self.budget
+        self.budget0 = self.rules.alien_budget          # limited per-game strike budget
+        self.budget = self.budget0
         self.tick = 0
         T = rules.alien_every
         self.next_strike = self.rng.randint(1, T) if rules.random_events else T

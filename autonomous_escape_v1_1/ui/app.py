@@ -1046,13 +1046,10 @@ class App:
         r = self.card(PX, 236, PW, 86)
         self.blit_text('ALIEN', (r.x + 16, r.y + 9), 13, ORANGE, True)
         self.blit_text(f'Turn {s.tick}', (r.right - 16, r.y + 6), 18, TEXT, True, 'topright')
-        if s.budget0 <= 60:
-            for i in range(s.budget0):
-                cx = r.x + 22 + i * 22
-                used = i >= s.budget
-                pg.draw.circle(sc, (70, 60, 60) if used else ORANGE, (cx, r.y + 40), 7, 2 if used else 0)
-        else:
-            self.blit_text('unlimited strikes', (r.x + 16, r.y + 34), 13, ORANGE, False)
+        for i in range(s.budget0):
+            cx = r.x + 22 + i * 22
+            used = i >= s.budget
+            pg.draw.circle(sc, (70, 60, 60) if used else ORANGE, (cx, r.y + 40), 7, 2 if used else 0)
         if s.result:
             msg = ''
         elif s.turn == ALIEN:
