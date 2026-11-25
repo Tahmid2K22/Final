@@ -1,11 +1,8 @@
 """Rover agents. Each one sees only rover_view(): walls, its own boulder
 memory, incoming debris, fuel and public counters."""
-import heapq
-import math
-
 import numpy as np
 
-from ..config import OPEN, SOFT, HARD, INF
+from ..config import OPEN, SOFT, INF
 from ..graph import astar, bfs_moves, manhattan
 from ..fastsim import Sim, ROVER
 from .base import Agent, path_action

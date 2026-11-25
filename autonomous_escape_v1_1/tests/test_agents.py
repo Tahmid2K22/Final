@@ -1,11 +1,8 @@
-import random
-
 import pytest
 
-from escape import GameState, SOFT, HARD, INF, ROVER, ALIEN
-from escape.agents import ROVERS, ALIENS, GreedyAlien, FuzzyRover
+from escape import GameState, ROVER, ALIEN
+from escape.agents import ROVERS, ALIENS, FuzzyRover
 from escape.bench import play, wilson
-from escape.graph import astar
 
 
 @pytest.mark.parametrize('rover', [c.name for c in ROVERS])

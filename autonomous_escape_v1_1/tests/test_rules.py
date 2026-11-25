@@ -216,7 +216,7 @@ def _strike_ticks(game_seed, n=60):
 
 
 def test_games_are_random_but_replayable():
-    a, b = _strike_ticks(1), _strike_ticks(2)
+    a, _ = _strike_ticks(1), _strike_ticks(2)
     assert _strike_ticks(1) == a                     # same game seed: identical game
     assert any(_strike_ticks(g) != a for g in range(2, 8))   # other seeds: different timings
     for t0, t1 in zip(a, a[1:]):

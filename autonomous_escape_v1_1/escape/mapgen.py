@@ -268,31 +268,6 @@ def generate(seed, rules=DEFAULT):
 FEATURES = ('rings', 'bars', 'ridges', 'islands', 'scatter', 'plazas')
 
 
-def _maze(n, rng, loops):
-    """Recursive-backtracker maze on the odd cells (1-wide winding corridors and
-    dead ends), then a share of the inner walls knocked out to make side loops."""
-    walls = [[True] * n for _ in range(n)]
-    sr, sc = 1 + 2 * rng.randrange((n - 1) // 2), 1 + 2 * rng.randrange((n - 1) // 2)
-    walls[sr][sc] = False
-    stack, seen = [(sr, sc)], {(sr, sc)}
-    while stack:
-        r, c = stack[-1]
-        opts = [(r + 2 * dr, c + 2 * dc, dr, dc) for dr, dc in DIRS
-                if 0 < r + 2 * dr < n - 1 and 0 < c + 2 * dc < n - 1 and (r + 2 * dr, c + 2 * dc) not in seen]
-        if not opts:
-            stack.pop()
-            continue
-        nr, nc, dr, dc = rng.choice(opts)
-        walls[r + dr][c + dc] = walls[nr][nc] = False
-        seen.add((nr, nc))
-        stack.append((nr, nc))
-    for r in range(1, n - 1):
-        for c in range(1, n - 1):
-            if walls[r][c] and (r % 2) != (c % 2) and rng.random() < loops:
-                walls[r][c] = False
-    return walls
-
-
 def _endpoints(n, rng):
     """Base and pad on random opposite sides (or opposite corners)."""
     lo, hi = 2, n - 3

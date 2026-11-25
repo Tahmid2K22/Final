@@ -103,10 +103,8 @@ from `game_seed`:
   candidate with at least two routes when available; otherwise it falls back
   to the regular generator.
 
-The source also contains a recursive-backtracker `_maze()` helper, but the
-current `generate_random()` path does not call it. The random maps in play are
-therefore noise-grown rock fields with carved channels and overlays, not
-recursive-backtracker mazes.
+The random maps in play are noise-grown rock fields with carved channels and
+overlays, not recursive-backtracker mazes.
 
 ### Regular maps used by tests and benchmarks
 

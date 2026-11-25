@@ -4,7 +4,7 @@ import random
 import time
 
 from ..config import OPEN, SOFT, HARD, INF
-from ..graph import astar, bfs_moves, min_vertex_cut, manhattan
+from ..graph import astar, min_vertex_cut, manhattan
 from ..fastsim import Sim, ROVER, ALIEN
 from .base import Agent
 
@@ -77,14 +77,9 @@ class MCTSAlien(Agent):
         self.rng = random.Random(seed)
 
     def candidates(self, sim, extra_tiles=()):
-        path = sim.path_ahead(14)
-        path_set = set(path)
-        goal_d = sim.dist()
-        pos_d = goal_d.get(sim.pos, INF)
-        # Only consider existing soft boulders that are actually ahead of the rover
-        ahead_softs = [p for p, b in sim.blk.items()
-                       if b == SOFT and (p in path_set or goal_d.get(p, INF) < pos_d)]
-        tiles = list(extra_tiles) + path + ahead_softs
+        tiles = list(extra_tiles)
+        tiles += sim.path_ahead(14)
+        tiles += [p for p, b in sim.blk.items() if b == SOFT]
         acts, seen = [None], set()
         for p in tiles:
             if p in seen or not sim.can_target(p):
@@ -92,19 +87,16 @@ class MCTSAlien(Agent):
             seen.add(p)
             b = sim.blk.get(p, OPEN)
             acts.append(('boulder', p) if b == OPEN else ('debris', p))
-            if b == OPEN:
-                # Only use fireballs within TTL reach of the rover
-                if manhattan(p, sim.pos) <= min(4, sim.r.fireball_ttl - 1) and len(acts) < 12:
-                    acts.append(('fireball', p))
-                if len(acts) < 10:
-                    acts.append(('debris', p))
+            if b == OPEN and len(acts) < 10:
+                acts.append(('fireball', p))
+                acts.append(('debris', p))
             if len(acts) >= 24:
                 break
         return acts
 
     def _advance_rover(self, sim):
         while sim.result is None and sim.turn == ROVER:
-            sim.apply_rover(_smart_rover_action(sim))
+            sim.apply_rover(sim.greedy_rover_action())
 
     def _reward(self, sim):
         if sim.result == ALIEN:
@@ -119,17 +111,14 @@ class MCTSAlien(Agent):
             self._advance_rover(sim)
             if sim.result is not None:
                 break
-            path = [p for p in sim.path_ahead(10) if sim.can_target(p)]
-            # Prefer hardening a soft boulder on the active path, otherwise block ahead
-            soft_on_path = [p for p in path if sim.blk.get(p, OPEN) == SOFT]
-            if soft_on_path and self.rng.random() < 0.7:
-                sim.apply_alien(('debris', soft_on_path[0]))
-            elif path:
-                r = self.rng.random()
-                p = path[0] if r < 0.55 else self.rng.choice(path[:5])
+            path = [p for p in sim.path_ahead(8) if sim.can_target(p)]
+            r = self.rng.random()
+            if path and r < 0.6:
+                p = path[0] if r < 0.4 else self.rng.choice(path)
                 sim.apply_alien(('boulder', p) if sim.blk.get(p, OPEN) == OPEN else ('debris', p))
             else:
-                sim.apply_alien(None)
+                softs = [p for p, b in sim.blk.items() if b == SOFT and sim.can_target(p)]
+                sim.apply_alien(('debris', self.rng.choice(softs)) if softs else None)
             turns -= 1
         return self._reward(sim)
 
@@ -209,6 +198,7 @@ def _smart_rover_action(sim):
 
 
 # ---------------------------------------------------------------- strategic hunter
+
 def _rover_bfs_dist(gmap, blk, rover):
     """BFS move-distance from the rover (ignoring HARD)."""
     from collections import deque
@@ -455,4 +445,3 @@ class StrategicHunterAlien(Agent):
 
 
 ALIENS.append(StrategicHunterAlien)
-

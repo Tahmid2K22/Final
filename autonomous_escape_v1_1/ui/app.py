@@ -19,37 +19,34 @@ import pygame as pg
 from escape import GameState, OPEN, SOFT, HARD, ROVER, ALIEN, INF
 from escape.agents import ROVER_BY_NAME, ALIEN_BY_NAME, make_rover, make_alien
 from escape.graph import astar, manhattan
-from escape.config import rules_for
 from . import sprites, terrain
 
 W, H = 1280, 780
 TILE = 24                     # world pixels per tile; the camera scales the world into VIEW
 GX, GY = 0, 0                 # the board is drawn in world coordinates
-VIEW = pg.Rect(12, 12, 756, 756)   # where the board appears on screen
-PX = 792                      # panel left edge
+VIEW = pg.Rect(12, 12, W - 24, H - 24)   # the board fills the window; HUD floats on top
 # The five regions set the look (colours, sun, signature feature). Everything
 # else is random every game: map size, base and pad, maze, features, rules.
 MAPS = [(1, 'Stickney Rim'), (2, 'Kepler Grooves'), (3, 'Limtoc Basin'), (4, 'Reldresal Maze'),
         (5, 'Drunlo Serpentine')]
 MAP_STYLE = {1: ('rings', 'iron'), 2: ('bars', 'basalt'), 3: ('islands', 'pale'), 4: ('scatter', 'boulder'),
              5: ('ridges', 'ice')}
-PW = W - PX - 16
 ASSETS = os.path.join(os.path.dirname(__file__), 'assets')
 
-# palette (matches the deck: deep space purple, cyan rover, orange alien)
-BG = (10, 9, 24)
-PANEL = (20, 18, 42, 222)
-PANEL_EDGE = (58, 52, 108)
-TEXT = (236, 236, 246)
-MUTED = (156, 154, 184)
-DIM = (100, 98, 128)
-CYAN = (86, 220, 232)
-ORANGE = (255, 158, 64)
-RED = (240, 84, 96)
-GREEN = (110, 220, 140)
-YELLOW = (250, 210, 90)
-PURPLE = (170, 130, 255)
-FOG = (6, 8, 22)
+# palette: flat mission-ops HUD on charcoal, amber alien / teal rover, no neon cards
+BG = (8, 10, 14)
+PANEL = (14, 17, 23, 236)
+PANEL_EDGE = (58, 66, 80)
+TEXT = (234, 237, 240)
+MUTED = (148, 156, 168)
+DIM = (94, 102, 116)
+CYAN = (78, 208, 196)
+ORANGE = (255, 152, 56)
+RED = (232, 78, 78)
+GREEN = (118, 208, 132)
+YELLOW = (244, 202, 84)
+PURPLE = (158, 140, 210)
+FOG = (6, 8, 14)
 
 MODES = [('ai', 'AI vs AI'), ('alien', 'You are the Alien'), ('rover', 'You are the Rover')]
 SPEEDS = [1, 2, 4, 8, 16]
@@ -94,11 +91,23 @@ def ease(t):
 
 
 class App:
-    def __init__(self, mode='ai', rover='A*', alien='Strategic Hunter', seed=None, speed=4, headless=False):
+    def __init__(self, mode='ai', rover='A*', alien='Greedy', seed=None, speed=4, headless=False,
+                 fullscreen=False):
         pg.init()
         pg.display.set_caption('Autonomous Escape')
-        flags = 0 if os.environ.get('SDL_VIDEODRIVER') == 'dummy' else pg.SCALED | pg.RESIZABLE
-        self.screen = pg.display.set_mode((W, H), flags)
+        dummy = os.environ.get('SDL_VIDEODRIVER') == 'dummy'
+        self.fullscreen = bool(fullscreen) and not dummy
+        if self.fullscreen:
+            info = pg.display.Info()
+            self.display = pg.display.set_mode((info.current_w, info.current_h), pg.FULLSCREEN)
+        else:
+            self.display = pg.display.set_mode((W, H), 0 if dummy else pg.RESIZABLE)
+        # everything draws into a fixed 1280x780 logical canvas; present_ui()
+        # scales it to the real window and draws text at the final pixel size
+        self.screen = pg.Surface((W, H))
+        self.text_ops = []
+        self.scale, self.ox, self.oy = 1.0, 0, 0
+        self.update_scale()
         self.clock = pg.time.Clock()
         self.fonts = {}
         self.text_cache = {}
@@ -111,7 +120,6 @@ class App:
         self.menu_row = 0
         self.show_fog = True
         self.show_plan = True
-        self.show_cut = True
         self.show_grid = False
         self.paused = False
         self.headless = headless
@@ -149,28 +157,57 @@ class App:
             self.text_cache[key] = surf
         return surf
 
+    def update_scale(self):
+        """Uniform letterboxed scale from the 1280x780 canvas to the window."""
+        dw, dh = self.display.get_size()
+        k = min(dw / W, dh / H)
+        self.scale = k
+        self.ox, self.oy = (dw - W * k) / 2, (dh - H * k) / 2
+
+    def to_logical(self, pos):
+        """Window pixel -> logical canvas coordinate."""
+        return ((pos[0] - self.ox) / self.scale, (pos[1] - self.oy) / self.scale)
+
+    def toggle_fullscreen(self):
+        if os.environ.get('SDL_VIDEODRIVER') == 'dummy':
+            return
+        self.fullscreen = not self.fullscreen
+        if self.fullscreen:
+            info = pg.display.Info()
+            self.display = pg.display.set_mode((info.current_w, info.current_h), pg.FULLSCREEN)
+        else:
+            self.display = pg.display.set_mode((W, H), pg.RESIZABLE)
+        self.update_scale()
+
+    def present_ui(self):
+        """Scale the canvas to the window, then draw queued text at the final
+        pixel size so it stays sharp at any resolution or in fullscreen."""
+        self.update_scale()
+        disp = self.display
+        dw, dh = disp.get_size()
+        disp.fill(BG)
+        tw, th = max(1, round(W * self.scale)), max(1, round(H * self.scale))
+        img = pg.transform.smoothscale(self.screen, (tw, th)) if self.scale != 1 else self.screen
+        disp.blit(img, (round(self.ox), round(self.oy)))
+        for s, pos, size, color, bold, anchor in self.text_ops:
+            fs = max(1, round(size * self.scale))
+            surf = self.text(s, fs, color, bold)
+            p = (self.ox + pos[0] * self.scale, self.oy + pos[1] * self.scale)
+            disp.blit(surf, surf.get_rect(**{anchor: p}))
+        self.text_ops = []
+        pg.display.flip()
+
     def blit_text(self, s, pos, size=16, color=TEXT, bold=False, anchor='topleft', target=None):
-        surf = self.text(s, size, color, bold)
-        rect = surf.get_rect(**{anchor: pos})
-        (target or self.screen).blit(surf, rect)
+        if target is not None:                      # world layer: draw immediately
+            surf = self.text(s, size, color, bold)
+            rect = surf.get_rect(**{anchor: pos})
+            target.blit(surf, rect)
+            return rect
+        w, h = self.font(size, bold).size(s)
+        rect = pg.Rect(0, 0, w, h)
+        setattr(rect, anchor, pos)
+        self.text_ops.append((s, tuple(pos), size, color, bold, anchor))
         return rect
-
-    def wrap(self, s, size, width):
-        words, lines, cur = s.split(), [], ''
-        for w in words:
-            t = (cur + ' ' + w).strip()
-            if self.font(size).size(t)[0] <= width:
-                cur = t
-            else:
-                lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        return lines
-
-    @staticmethod
-    def tile_rect(p):
-        return pg.Rect(GX + p[1] * TILE, GY + p[0] * TILE, TILE, TILE)
 
     @staticmethod
     def tile_center(p):
@@ -195,25 +232,26 @@ class App:
 
     def screen_pos(self, p):
         """Where tile p's centre appears on screen, through the camera."""
-        x0, y0, w = self.view_rect()
+        x0, y0, _, _ = self.view_rect()
         wx, wy = self.local(p)
-        return (VIEW.x + (wx - x0) * VIEW.w / w, VIEW.y + (wy - y0) * VIEW.w / w)
+        return (VIEW.x + (wx - x0) * self.zoom, VIEW.y + (wy - y0) * self.zoom)
 
     # ------------------------------------------------------------ camera
     def fit_zoom(self):
-        return VIEW.w / (self.state.map.size * TILE)
+        S = self.state.map.size * TILE
+        return min(VIEW.w / S, VIEW.h / S)
 
     def view_rect(self):
-        """The part of the world image that is on screen."""
+        """The part of the world image that is on screen: (x0, y0, w, h)."""
         S = self.state.map.size * TILE
-        w = min(S, VIEW.w / self.zoom)
-        x0 = min(max(self.cam[0] - w / 2, 0), S - w)
-        y0 = min(max(self.cam[1] - w / 2, 0), S - w)
-        return x0, y0, w
+        w, h = VIEW.w / self.zoom, VIEW.h / self.zoom
+        x0 = (S - w) / 2 if w >= S else min(max(self.cam[0] - w / 2, 0), S - w)
+        y0 = (S - h) / 2 if h >= S else min(max(self.cam[1] - h / 2, 0), S - h)
+        return x0, y0, w, h
 
     def screen_to_world(self, x, y):
-        x0, y0, w = self.view_rect()
-        return x0 + (x - VIEW.x) * w / VIEW.w, y0 + (y - VIEW.y) * w / VIEW.w
+        x0, y0, _, _ = self.view_rect()
+        return x0 + (x - VIEW.x) / self.zoom, y0 + (y - VIEW.y) / self.zoom
 
     def set_zoom(self, z, anchor=None):
         """Zoom between 'whole map' and 2x, keeping the point under the cursor still."""
@@ -221,26 +259,36 @@ class App:
         if anchor is not None:
             wx, wy = self.screen_to_world(*anchor)
             self.zoom = z
-            x0, y0, w = self.view_rect()
-            fx, fy = (anchor[0] - VIEW.x) / VIEW.w, (anchor[1] - VIEW.y) / VIEW.w
-            self.cam = [wx - fx * w + w / 2, wy - fy * w + w / 2]
+            x0, y0, _, _ = self.view_rect()
+            self.cam = [wx - (anchor[0] - VIEW.x) / z + (VIEW.w / z) / 2,
+                        wy - (anchor[1] - VIEW.y) / z + (VIEW.h / z) / 2]
         else:
             self.zoom = z
         self.clamp_cam()
 
     def clamp_cam(self):
         S = self.state.map.size * TILE
-        w = min(S, VIEW.w / self.zoom)
-        self.cam = [min(max(self.cam[0], w / 2), S - w / 2), min(max(self.cam[1], w / 2), S - w / 2)]
+        w, h = VIEW.w / self.zoom, VIEW.h / self.zoom
+        if w < S:
+            self.cam[0] = min(max(self.cam[0], w / 2), S - w / 2)
+        else:
+            self.cam[0] = S / 2
+        if h < S:
+            self.cam[1] = min(max(self.cam[1], h / 2), S - h / 2)
+        else:
+            self.cam[1] = S / 2
 
     def present(self, world):
-        """Scale the visible part of the world image into the board window."""
-        x0, y0, w = self.view_rect()
-        src = world.subsurface(pg.Rect(int(x0), int(y0), max(1, int(w)), max(1, int(w))))
-        if abs(w - VIEW.w) < 1:
-            self.screen.blit(src, VIEW)
-        else:
-            self.screen.blit(pg.transform.smoothscale(src, VIEW.size), VIEW)
+        """Scale the world image into the board window, keeping aspect ratio."""
+        S = world.get_width()
+        k = self.zoom
+        size = int(round(S * k))
+        img = pg.transform.smoothscale(world, (size, size)) if size != S else world
+        x0, y0, _, _ = self.view_rect()
+        prev = self.screen.get_clip()
+        self.screen.set_clip(VIEW)
+        self.screen.blit(img, (VIEW.x - x0 * k, VIEW.y - y0 * k))
+        self.screen.set_clip(prev)
 
     def boulder_img(self, p, kind):
         key = (kind, (p[0] * 7 + p[1] * 13) % 6)
@@ -290,7 +338,7 @@ class App:
             self.screen.blit(self.space, (0, 0))
             self.blit_text(f'Landing on Phobos: {self.map_name()}...', (W // 2, H // 2 - 16), 28, TEXT, True, 'center')
             self.blit_text('Generating a new terrain for this game', (W // 2, H // 2 + 20), 18, MUTED, False, 'center')
-            pg.display.flip()
+            self.present_ui()
         # a completely random game: new map size, base and pad, maze + features, and rules
         self.state = GameState.random_game()
         g = self.state.game_seed                     # one fresh random seed per game, from the OS clock/entropy
@@ -299,7 +347,6 @@ class App:
         for a in (self.rover_ai, self.alien_ai):
             if a:
                 a.reset()
-        self.core_view = None
         self.terrain_cache = {self.seed: self.load_terrain(self.state.map, self.state.game_seed)}
         S = self.state.map.size * TILE
         self.world = pg.Surface((S, S)).convert() if pg.display.get_surface() else pg.Surface((S, S))
@@ -362,7 +409,7 @@ class App:
     def do_rover(self, action):
         s = self.state
         landing = [p for p, t in s.pending.items() if t == 1]
-        hits, fuel = s.hits, s.fuel
+        hits = s.hits
         self.rover_from = s.rover
         self.rover_t0 = pg.time.get_ticks()
         s.apply_rover(action)
@@ -452,12 +499,20 @@ class App:
                 self.handle(e)
             self.update()
             self.draw()
-            pg.display.flip()
+            self.present_ui()
         pg.quit()
 
     def handle(self, e):
         if e.type == pg.QUIT:
             self.running = False
+        elif e.type == pg.KEYDOWN and e.key == pg.K_F11:
+            self.toggle_fullscreen()
+        elif e.type in (pg.MOUSEBUTTONDOWN, pg.MOUSEBUTTONUP, pg.MOUSEMOTION):
+            e.pos = self.to_logical(e.pos)
+            if self.screen_name == 'menu':
+                self.handle_menu(e)
+            else:
+                self.handle_game(e)
         elif self.screen_name == 'menu':
             self.handle_menu(e)
         else:
@@ -576,7 +631,7 @@ class App:
         """Mouse wheel zooms at the cursor; right- or middle-drag pans (middle only
         when playing the alien, whose right click fires debris)."""
         if e.type == pg.MOUSEWHEEL:
-            pos = pg.mouse.get_pos()
+            pos = self.to_logical(pg.mouse.get_pos())
             if VIEW.collidepoint(pos):
                 self.set_zoom(self.zoom * (1.18 if e.y > 0 else 1 / 1.18), pos)
                 self.follow = False
@@ -626,8 +681,6 @@ class App:
                 self.show_fog = not self.show_fog
             elif e.key == pg.K_p:
                 self.show_plan = not self.show_plan
-            elif e.key == pg.K_c:
-                self.show_cut = not self.show_cut
             elif e.key == pg.K_g:
                 self.show_grid = not self.show_grid
             elif e.key in (pg.K_PLUS, pg.K_EQUALS, pg.K_KP_PLUS):
@@ -672,6 +725,7 @@ class App:
 
     # ------------------------------------------------------------ drawing
     def draw(self):
+        self.text_ops = []
         if self.screen_name == 'menu':
             self.draw_menu()
         else:
@@ -681,15 +735,13 @@ class App:
         return 'rover' if self.mode == 'rover' else 'god'
 
     def overlays(self):
-        """Rover's planned route (belief) and the alien's current min cut."""
+        """Rover's planned route (belief) and its cost."""
         if self.overlay_cache is None:
             s = self.state
             v = s.rover_view()
-            _, plan = astar(s.map, v.belief, s.rover, s.map.goal, s.rules)
-            cut, need, seal, arrive = ([], 0, 0, 0)
-            known, _ = astar(s.map, v.belief, s.rover, s.map.goal, s.rules)
+            known, plan = astar(s.map, v.belief, s.rover, s.map.goal, s.rules)
             self.costs = (known, s.route_cost())
-            self.overlay_cache = (plan, cut, need, seal, arrive)
+            self.overlay_cache = (plan,)
         return self.overlay_cache
 
     def rover_xy(self, now):
@@ -704,7 +756,7 @@ class App:
         s = self.state
         now = pg.time.get_ticks()
         rover_view = self.viewer() == 'rover'
-        plan, cut, need, seal, arrive = self.overlays()
+        plan, = self.overlays()
         rx, ry = self.rover_xy(now)
         L = self.layer
 
@@ -749,7 +801,7 @@ class App:
         for p, ttl in getattr(s, 'fireballs', {}).items():
             x, y = self.local(p)
             pg.draw.circle(L, (255, 80, 0), (x + TILE // 2, y + TILE // 2), TILE // 3, 2)
-            self.blit_text(str(ttl), (x + TILE // 2, y + TILE // 2), 12, (255, 120, 0), True, 'center')
+            self.blit_text(str(ttl), (x + TILE // 2, y + TILE // 2), 12, (255, 120, 0), True, 'center', target=L)
         if self.show_plan and len(plan) > 1 and not s.result:
             pts = smooth([(rx, ry)] + [self.local(p) for p in plan[1:]])
             pg.draw.lines(L, (*CYAN, 45), False, pts, 11)
@@ -757,10 +809,6 @@ class App:
             for q in beads(pts, 15):
                 pg.draw.circle(L, (240, 255, 255, 240), q, 2.6)
         self.draw_pad(L, s.map.goal, now)
-        if self.show_cut and cut and not s.result:
-            a = int(150 + 100 * (0.5 + 0.5 * math.sin(now / 220)))
-            for p in cut:
-                self.draw_brackets(L, p, (*ORANGE, a))
         if self.mode == 'alien' and s.turn == ALIEN and not s.result:
             self.draw_hover(L)
         self.draw_comets(L, now)
@@ -770,9 +818,7 @@ class App:
         self.screen = sc = screen
         self.present(self.world)
         self.draw_banner(plan, VIEW)
-        pg.draw.rect(sc, PANEL_EDGE, VIEW.inflate(4, 4), 2, border_radius=3)
-        self.draw_zoom_hint()
-        self.draw_panel(now, plan, cut, seal, arrive)
+        self.draw_hud(now, plan)
         if s.result:
             self.draw_end(VIEW)
 
@@ -784,7 +830,7 @@ class App:
         surf = pg.Surface(box.size, pg.SRCALPHA)
         pg.draw.rect(surf, (10, 9, 24, 170), surf.get_rect(), border_radius=6)
         self.screen.blit(surf, box)
-        self.screen.blit(tip, tip.get_rect(center=box.center))
+        self.blit_text(label, (box.x + 7, box.centery), 14, MUTED, False, 'midleft')
 
     def draw_fog(self, rx, ry, alpha, board):
         """One big fog sheet with a soft hole in the middle, slid under the rover."""
@@ -848,14 +894,6 @@ class App:
         pg.draw.circle(L, col, (x, y), 5, 2)
         self.blit_text(str(ttl), (x + 13, y - 20), 14, (255, 140, 120), True, target=L)
 
-    def draw_brackets(self, L, p, col):
-        r = pg.Rect(p[1] * TILE, p[0] * TILE, TILE, TILE).inflate(-4, -4)
-        k = 9
-        for (cx, cy), (dx, dy) in ((r.topleft, (1, 1)), (r.topright, (-1, 1)),
-                                   (r.bottomleft, (1, -1)), (r.bottomright, (-1, -1))):
-            pg.draw.line(L, col, (cx, cy), (cx + dx * k, cy), 3)
-            pg.draw.line(L, col, (cx, cy), (cx, cy + dy * k), 3)
-
     def comet_head(self, p, ttl, now):
         x, y = self.local(p)
         prog = min(1.0, (now - self.last_tick) / 700) * 0.7
@@ -900,7 +938,7 @@ class App:
         L.blit(self.ufo_img, self.ufo_img.get_rect(center=(x, y)))
 
     def draw_hover(self, L):
-        p = self.tile_at(pg.mouse.get_pos())
+        p = self.tile_at(self.to_logical(pg.mouse.get_pos()))
         if p is None:
             return
         s = self.state
@@ -999,133 +1037,99 @@ class App:
         surf = pg.Surface(box.size, pg.SRCALPHA)
         pg.draw.rect(surf, (120, 40, 30, 220), surf.get_rect(), border_radius=8)
         self.screen.blit(surf, box)
-        self.screen.blit(tip, tip.get_rect(center=box.center))
+        self.blit_text(msg, box.center, 16, (255, 230, 210), True, 'center')
 
-    # ------------------------------------------------------------ panel
-    def draw_panel(self, now, plan, cut, seal, arrive):
+    # ------------------------------------------------------------ HUD
+    def hud_box(self, rect, accent=None, alpha=236):
+        """Flat translucent HUD plate with an optional accent bar on its left edge."""
+        surf = pg.Surface(rect.size, pg.SRCALPHA)
+        surf.fill((14, 17, 23, alpha))
+        if accent:
+            pg.draw.rect(surf, (*accent, 255), (0, 0, 3, rect.h))
+        pg.draw.rect(surf, (58, 66, 80, 255), surf.get_rect(), 1)
+        self.screen.blit(surf, rect.topleft)
+        return rect
+
+    def stat_bar(self, rect, frac, col, marker=None):
+        sc = self.screen
+        pg.draw.rect(sc, (40, 44, 54), rect, border_radius=2)
+        frac = max(0.0, min(1.0, frac))
+        if frac > 0:
+            pg.draw.rect(sc, col, (rect.x, rect.y, max(2, int(rect.width * frac)), rect.height), border_radius=2)
+        if marker is not None and 0 < marker <= 1:
+            mx = rect.x + int(rect.width * marker)
+            pg.draw.line(sc, TEXT, (mx, rect.y - 3), (mx, rect.bottom + 3), 2)
+
+    def draw_hud(self, now, plan):
+        """Everything floats over the board: no sidebar, no log, no control panel."""
         s = self.state
         sc = self.screen
         rover_view = self.viewer() == 'rover'
-        self.blit_text('AUTONOMOUS ESCAPE', (PX, 10), 26, TEXT, True)
-        feats = ' + '.join(getattr(s.map, 'features', []))
-        self.blit_text(f'{self.map_name()}  ·  {s.map.size}x{s.map.size}  ·  {feats}  ·  #{s.game_seed}',
-                       (PX + 2, 46), 15, MUTED)
+        x0, y0 = VIEW.x + 14, VIEW.y + 14
 
-        # matchup
-        r = self.card(PX, 76, PW, 58)
-        rv = self.rover_ai.name if self.rover_ai else 'You'
-        al = self.alien_ai.name if self.alien_ai else 'You'
-        self.blit_text('ROVER', (r.x + 16, r.y + 8), 13, CYAN, True)
-        self.blit_text(rv, (r.x + 16, r.y + 25), 20, TEXT, True)
-        self.blit_text('ALIEN', (r.centerx + 16, r.y + 8), 13, ORANGE, True)
-        self.blit_text(al, (r.centerx + 16, r.y + 25), 20, TEXT, True)
-        self.blit_text('vs', (r.centerx - 8, r.centery), 15, DIM, False, 'center')
-
-        # fuel
-        r = self.card(PX, 142, PW, 86)
-        self.blit_text('FUEL', (r.x + 16, r.y + 9), 13, CYAN, True)
-        self.blit_text(f'{max(s.fuel, 0)} / {s.fuel0}', (r.right - 16, r.y + 6), 18, TEXT, True, 'topright')
-        bar = pg.Rect(r.x + 16, r.y + 33, r.width - 32, 14)
-        pg.draw.rect(sc, (40, 38, 70), bar, border_radius=7)
+        # --- top-left: fuel + damage --------------------------------------
+        w, h = 240, 92
+        r = self.hud_box(pg.Rect(x0, y0, w, h), CYAN)
+        self.blit_text('FUEL', (r.x + 14, r.y + 10), 13, CYAN, True)
+        self.blit_text(f'{max(s.fuel, 0)} / {s.fuel0}', (r.right - 14, r.y + 7), 17, TEXT, True, 'topright')
+        bar = pg.Rect(r.x + 14, r.y + 32, w - 28, 12)
         frac = max(0, s.fuel) / s.fuel0
         col = GREEN if frac > 0.45 else YELLOW if frac > 0.2 else RED
-        pg.draw.rect(sc, col, (bar.x, bar.y, int(bar.width * frac), bar.height), border_radius=7)
+        marker = None
         if rover_view:
-            cost, label = self.costs[0], 'Best known route'
+            cost = self.costs[0]
         else:
-            cost, label = self.costs[1], 'Cheapest true route'
-        cost_txt = 'none' if cost == INF else f'{cost:.0f} fuel'
+            cost = self.costs[1]
+        if cost != INF and cost <= s.fuel0:
+            marker = cost / s.fuel0
+        self.stat_bar(bar, frac, col, marker)
         ok = cost != INF and cost <= s.fuel
-        if cost != INF and 0 < bar.width * cost / s.fuel0 <= bar.width:
-            mx = bar.x + int(bar.width * min(cost, s.fuel0) / s.fuel0)
-            pg.draw.line(sc, TEXT, (mx, bar.y - 4), (mx, bar.bottom + 4), 2)
-        self.blit_text(f'{label}: {cost_txt}', (r.x + 16, r.y + 56), 15, TEXT if ok else RED)
-        self.blit_text(f'shots {s.shots}  ·  hits {s.hits}', (r.right - 16, r.y + 56), 15, MUTED, False, 'topright')
+        cost_txt = 'none' if cost == INF else f'{cost:.0f}'
+        self.blit_text(f'route {cost_txt}', (r.x + 14, r.y + 50), 14, TEXT if ok else RED)
+        self.blit_text(f'hits {s.hits}', (r.right - 14, r.y + 50), 14, MUTED, False, 'topright')
+        # damage
+        self.blit_text('DAMAGE', (r.x + 14, r.y + 70), 12, MUTED, True)
+        dmg_bar = pg.Rect(r.x + 84, r.y + 74, w - 98, 9)
+        self.stat_bar(dmg_bar, s.damage / s.rules.max_damage, RED)
+        self.blit_text(f'{s.damage}/{s.rules.max_damage}', (r.right - 14, r.y + 68), 13, TEXT, True, 'topright')
 
-        # alien clock
-        r = self.card(PX, 236, PW, 86)
-        self.blit_text('ALIEN', (r.x + 16, r.y + 9), 13, ORANGE, True)
-        self.blit_text(f'Turn {s.tick}', (r.right - 16, r.y + 6), 18, TEXT, True, 'topright')
-        for i in range(s.budget0):
-            cx = r.x + 22 + i * 22
-            used = i >= s.budget
-            pg.draw.circle(sc, (70, 60, 60) if used else ORANGE, (cx, r.y + 40), 7, 2 if used else 0)
-        if s.result:
-            msg = ''
-        elif s.turn == ALIEN:
-            msg = 'YOUR STRIKE: click a tile (Space to hold)' if self.mode == 'alien' else 'Alien is striking...'
+        # --- top-right: turn / strike / agents ---------------------------
+        rv = self.rover_ai.name if self.rover_ai else 'You'
+        al = self.alien_ai.name if self.alien_ai else 'You'
+        lines = [f'{rv}  vs  {al}', f'Turn {s.tick}']
+        if not s.result and s.turn == ALIEN:
+            lines.append('YOUR STRIKE: click a tile (Space to hold)' if self.mode == 'alien'
+                         else 'Alien is striking...')
         elif s.budget == 0:
-            msg = 'Alien is out of strikes'
+            lines.append('Alien is out of strikes')
         else:
             k = max(1, s.next_strike - s.tick)
-            msg = f'Next strike in {k} turn{"s" if k > 1 else ""}'
+            lines.append(f'Next strike in {k} turn{"s" if k > 1 else ""}')
         if s.pending and not s.result:
-            msg += f'   ·   {len(s.pending)} debris incoming'
-        self.blit_text(msg, (r.x + 16, r.y + 58), 15, ORANGE if s.turn == ALIEN else TEXT, s.turn == ALIEN)
+            lines.append(f'{len(s.pending)} debris incoming')
+        if self.paused and not s.result:
+            lines.append('PAUSED  ·  → step  ·  + / - speed')
+        tw = max(self.font(15).size(t)[0] for t in lines) + 34
+        th = 22 + 22 * len(lines)
+        r = self.hud_box(pg.Rect(VIEW.right - 14 - tw, y0, tw, th), ORANGE)
+        for i, t in enumerate(lines):
+            col = ORANGE if i == 0 else (TEXT if i == 1 else MUTED)
+            if t in ('PAUSED  ·  → step  ·  + / - speed',) or t.endswith('striking...') or t.startswith('YOUR STRIKE'):
+                col = ORANGE
+            self.blit_text(t, (r.x + 14, r.y + 9 + i * 22), 15, col, i < 2)
 
-        # AI thoughts
-        r = self.card(PX, 330, PW, 70)
-        self.blit_text('WHAT THE AI SEES', (r.x + 16, r.y + 9), 13, PURPLE, True)
-        lines = []
-        if self.rover_ai:
-            route = f'route {len(plan) - 1} tiles' if len(plan) > 1 else 'no known route'
-            lines.append((CYAN, f'{self.rover_ai.name}: ' + (self.rover_ai.info or route)))
-        if self.alien_ai and rover_view:
-            lines.append((ORANGE, f'{self.alien_ai.name}: plans hidden by the fog'))
-        elif self.alien_ai:
-            lines.append((ORANGE, f'{self.alien_ai.name}: ' + (self.alien_ai.info or 'waiting')))
-        elif cut:
-            lines.append((ORANGE, f'Min cut: {len(cut)} tiles, seal {seal} turns vs rover {arrive}'))
-        for i, (col, line) in enumerate(lines[:2]):
-            t = line if self.font(15).size(line)[0] < r.width - 32 else line[:60] + '...'
-            self.blit_text(t, (r.x + 16, r.y + 28 + i * 20), 15, col)
+        # --- bottom-left: zoom hint ---------------------------------------
+        self.draw_zoom_hint()
 
-        # event log
-        r = self.card(PX, 408, PW, 166)
-        self.blit_text('MISSION LOG', (r.x + 16, r.y + 9), 13, MUTED, True)
-        events = s.log
-        if rover_view:
-            events = [(t, m) for t, m in s.log if 'drops a boulder' not in m]
-        for i, (t, m) in enumerate(reversed(events[-6:])):
-            self.blit_text(f'T{t:>3}', (r.x + 16, r.y + 32 + i * 21), 14, DIM)
-            self.blit_text(m, (r.x + 62, r.y + 32 + i * 21), 14, TEXT if i == 0 else MUTED)
-
-        # controls + legend
-        r = self.card(PX, 582, PW, 186)
-        self.blit_text('CONTROLS', (r.x + 16, r.y + 9), 13, MUTED, True)
-        if self.mode == 'rover':
-            ctl = ['Arrows / WASD  drive (bump a loose boulder to shoot)', 'Space  wait one turn']
-        elif self.mode == 'alien':
-            ctl = ['Left-click  boulder on open ground, debris on a boulder',
-                   'Right-click  debris on open ground', 'Space  hold this strike']
-        else:
-            ctl = [f'Space  pause{" (paused)" if self.paused else ""}   ·   →  step one move',
-                   f'+ / -  speed ({self.speed} moves/s)']
-        ctl += ['Wheel zoom · right-drag pan · Z whole map · V follow rover',
-                'F fog · P route · C cut · G grid · R replay · N next map · Esc']
-        pass
-        ly = r.bottom - 34
-        lx = r.x + 12
-        for key, label in (('soft', 'loose boulder'), ('hard', 'fused'), ('debris', 'incoming'),
-                           ('cut', 'min cut'), ('pad', 'pad')):
-            if key in ('soft', 'hard'):
-                img = pg.transform.smoothscale(self.boulder_img((0, 0), SOFT if key == 'soft' else HARD), (30, 30))
-                sc.blit(img, img.get_rect(center=(lx + 10, ly + 10)))
-            elif key == 'debris':
-                pg.draw.circle(sc, (255, 96, 80), (lx + 10, ly + 10), 8, 2)
-                pg.draw.circle(sc, (255, 96, 80), (lx + 10, ly + 10), 3, 2)
-            elif key == 'cut':
-                pg.draw.rect(sc, ORANGE, (lx + 2, ly + 2, 16, 16), 2, border_radius=3)
-            else:
-                pg.draw.circle(sc, CYAN, (lx + 10, ly + 10), 8, 2)
-            t = self.blit_text(label, (lx + 24, ly + 1), 14, MUTED)
-            lx = t.right + 12
-
+        # --- bottom-center: flash messages --------------------------------
         if self.flash and now - self.flash_t < 1800:
             tip = self.text(self.flash, 16, TEXT, True)
-            box = tip.get_rect(midbottom=(VIEW.centerx, VIEW.bottom - 40)).inflate(22, 10)
-            pg.draw.rect(sc, (90, 28, 44), box, border_radius=8)
-            sc.blit(tip, tip.get_rect(center=box.center))
+            box = tip.get_rect(midbottom=(VIEW.centerx, VIEW.bottom - 16)).inflate(22, 10)
+            surf = pg.Surface(box.size, pg.SRCALPHA)
+            pg.draw.rect(surf, (60, 20, 26, 235), surf.get_rect(), border_radius=4)
+            pg.draw.rect(surf, (*RED, 255), surf.get_rect(), 1, border_radius=4)
+            sc.blit(surf, box)
+            self.blit_text(self.flash, box.center, 16, TEXT, True, 'center')
 
     def draw_end(self, board):
         s = self.state
@@ -1151,12 +1155,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='Autonomous Escape')
     ap.add_argument('--mode', choices=[m for m, _ in MODES], default='ai')
     ap.add_argument('--rover', choices=list(ROVER_BY_NAME), default='A*')
-    ap.add_argument('--alien', choices=list(ALIEN_BY_NAME), default='Strategic Hunter')
+    ap.add_argument('--alien', choices=list(ALIEN_BY_NAME), default='Greedy')
     ap.add_argument('--seed', type=int)
     ap.add_argument('--speed', type=int, default=4)
     ap.add_argument('--play', action='store_true', help='skip the menu')
+    ap.add_argument('--fullscreen', action='store_true', help='start in fullscreen')
     args = ap.parse_args(argv)
-    app = App(args.mode, args.rover, args.alien, args.seed, args.speed)
+    app = App(args.mode, args.rover, args.alien, args.seed, args.speed, fullscreen=args.fullscreen)
     if args.play:
         app.start_game()
     app.run()
